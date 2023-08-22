@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.CSharp;
 
 namespace Sample.Analyzers {
     [DiagnosticAnalyzer(LanguageNames.CSharp)]
@@ -163,6 +164,43 @@ namespace Sample.Analyzers {
             newClassDecleration = Utils.AddBase(newClassDecleration, monoBehaviourTypeSyntax);
 
             var newRoot = root.ReplaceNode(classDecleration, newClassDecleration);
+            return document.WithSyntaxRoot(newRoot);
+        }
+    }
+
+    /// <summary>
+    /// Adds [RequireComponent(typeof(ViewGameObject))] attribute.
+    /// </summary>
+    [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(Fix004)), Shared]
+    class Fix004 : CodeFixProvider {
+        public sealed override ImmutableArray<string> FixableDiagnosticIds => ImmutableArray.Create(ViewAnalyzers.Rule004.Id);
+        public sealed override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
+        public sealed override async Task RegisterCodeFixesAsync(CodeFixContext context) {
+            var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken).ConfigureAwait(false);
+
+            var diagnostic = context.Diagnostics[0];
+            var diagnosticSpan = diagnostic.Location.SourceSpan;
+            var declaration = root.FindToken(diagnosticSpan.Start).Parent.AncestorsAndSelf().OfType<ClassDeclarationSyntax>().First();
+
+            context.RegisterCodeFix(
+                CodeAction.Create(
+                    title: Resources.AnalyzeFix_MV004,
+                    createChangedDocument: ct => AddRequireComponentAttribute_ViewGameObject(context.Document, declaration, ct),
+                    equivalenceKey: Resources.AnalyzeFix_MV004),
+                diagnostic);
+        }
+
+        private static async Task<Document> AddRequireComponentAttribute_ViewGameObject(Document document, ClassDeclarationSyntax classDecleration, CancellationToken cancellationToken) {
+            var root = await document.GetSyntaxRootAsync(cancellationToken);
+
+            // add the attribute
+            var newAttributeList = classDecleration.AttributeLists;
+            NameSyntax name = SyntaxFactory.ParseName($"{Resources.UnityEngine_Namespace}.{Resources.RequireComponent}");
+            AttributeArgumentListSyntax args = SyntaxFactory.ParseAttributeArgumentList($"(typeof({$"{Resources.IView_Namespace}.{Resources.ViewGameObject}"}))");
+            AttributeSyntax attribute = SyntaxFactory.Attribute(name, args);
+            newAttributeList = newAttributeList.Replace(newAttributeList[0], newAttributeList[0].AddAttributes(attribute));
+
+            var newRoot = root.ReplaceNode(classDecleration, classDecleration.WithAttributeLists(newAttributeList));
             return document.WithSyntaxRoot(newRoot);
         }
     }
